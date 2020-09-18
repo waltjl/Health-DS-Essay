@@ -1,0 +1,297 @@
+---
+title: "eda_notebook"
+author: "Jordyn Walton"
+date: '2020-03-29'
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(naniar)
+library(caret)
+library(GGally)
+```
+
+## R Markdown
+This is a notebook for exploratory analysis of the training set.
+
+```{r}
+train_labCount_data <- readRDS("train_LabCount_data.RDS")
+train_label <- readRDS("train_SepsisLabel_A12H.RDS")
+test_labCount_data<- readRDS("test_LabCount_data.RDS")
+test_label <- readRDS("test_SepsisLabel_A12H.RDS")
+
+dim(train_labCount_data)
+dim(test_labCount_data)
+```
+
+
+`r nrow(train_labCount_data)` individuals with `r ncol(train_labCount_data)` variables – including demographics, vital signs and lab values
+
+```{r}
+sum(train_label$SepsisLabel)
+
+sum(train_label$SepsisLabel)/nrow(train_labCount_data)
+```
+
+1366 have sepsis (5.51%)
+
+
+```{r}
+demographics = names(train_labCount_data)[1:6]
+# > demographics
+# [1] "patientid"   "Age"         "Gender"      "Unit1"       "Unit2"
+# [6] "HospAdmTime"
+demInc = demographics[2:3] #only including variables inherent to the patient
+
+
+vitalSigns = names(train_labCount_data)[7:(6+8*4)]
+Lab = names(train_labCount_data)[39:length(names(train_labCount_data))]
+
+train_labCount_df = train_labCount_data[,colnames(train_labCount_data)%in% c(demInc,vitalSigns,Lab)]
+
+
+train_corr = cor(train_labCount_df)
+train_corr[1:6,1:6]
+```
+Mostly NAs
+
+
+
+```{r}
+train_corr = cor(train_labCount_df,use = "pairwise.complete.obs")
+train_corr[1:6,1:6]
+```
+
+
+
+
+#how much is missing in the dataset
+
+```{r}
+head(train_labCount_df)
+
+```
+
+
+
+```{r}
+vis_miss(train_labCount_data,warn_large_data = FALSE)
+```
+
+A high percentage of EtCO2 is missing
+
+
+
+
+```{r}
+vis_miss(train_labCount_data[,grep("mean",colnames(train_labCount_data))],warn_large_data = FALSE)
+
+```
+
+
+```{r}
+vis_miss(train_labCount_data[,grep("min",colnames(train_labCount_data))],warn_large_data = FALSE)
+
+```
+
+
+
+
+
+```{r}
+vis_miss(train_labCount_data[,grep("count",colnames(train_labCount_data))],warn_large_data = FALSE)
+
+```
+
+
+
+```{r}
+var_missing = miss_var_summary(train_labCount_data,order=T)
+head(var_missing)
+remove_miss_var = var_missing$variable[var_missing$pct_miss >=20]
+remove_miss_var
+```
+
+If I set the threshold to remove variables with more than 90% missingness, I am able to remove `r length(remove_miss_var)` variables.
+```{r}
+length(remove_miss_var)
+```
+
+This leads to a dataset with 53 variables.
+
+```{r}
+train_labCount_data_rem_miss = train_labCount_data[,!colnames(train_labCount_data) %in% remove_miss_var]
+ncol(train_labCount_data_rem_miss)
+```
+
+I also want to only work with complete cases.
+```{r}
+sum(complete.cases(train_labCount_data_rem_miss))
+```
+does this change a lot about the distribution of labels
+
+```{r}
+train_labCount_cmp = train_labCount_data_rem_miss[complete.cases(train_labCount_data_rem_miss),]
+head(train_labCount_cmp)
+```
+
+```{r}
+sum(train_label$SepsisLabel[train_label$patientid %in% train_labCount_cmp$patientid])
+```
+
+```{r}
+1078/20281
+```
+5.3% positive cases - similar to before
+
+
+Do any variables have zero or near zero variance? yes, i'll just remove those with zero variance, which there are 0 of, these are counts and variance may be skewed because of it.
+
+```{r}
+nzv <- nearZeroVar(train_labCount_cmp, saveMetrics= TRUE)
+sum(nzv$zeroVar)
+sum(nzv$nzv)
+
+colnames(train_labCount_cmp)[nzv$nzv]
+```
+
+
+I need to remove patient id and hospital admit time before analysis
+```{r}
+train_labCount_cmp_nadm = train_labCount_cmp[,!colnames(train_labCount_cmp) %in% c("patientid"
+                                                                                        ,"HospAdmTime")]
+```
+
+
+Do any variables have high colinearity?
+
+```{r}
+train_corr = cor(train_labCount_cmp_nadm)
+train_corr[1:6,1:6]
+```
+
+
+Visualizations
+
+```{r}
+ggcorr(train_labCount_cmp_nadm[,sort(colnames(train_labCount_cmp_nadm))],
+       method = c("pairwise.complete.obs","pearson"),label_size = 4)
+```
+
+```{r}
+ggpairs(train_labCount_cmp_nadm,columns = c(1,2,3,4,5,6))
+
+```
+
+
+Columns to remove
+
+```{r}
+remove_cor <- findCorrelation(train_corr,cutoff = 0.9)
+length(remove_cor)
+```
+
+This involves getting rid of `r length(remove_cor)` variables, including
+
+```{r}
+remove_cor_var = colnames(train_labCount_cmp_nadm)[remove_cor]
+remove_cor_var
+```
+
+
+Now to examine the variables that remain,
+
+```{r}
+train_labCount_df_reduced = train_labCount_cmp_nadm[,-remove_cor]
+colnames(train_labCount_df_reduced)
+```
+
+Quick question: how many of the initial variables are truly removed?
+ All demographics remain -ie age and gender
+ 
+
+ 
+```{r}
+sort(names(train_labCount_df_reduced))
+dim(train_labCount_df_reduced)
+```
+ 
+
+ 
+```{r}
+head(train_labCount_df_reduced)
+```
+
+
+```{r}
+train_labCount_data_reduced = train_labCount_cmp[,!colnames(train_labCount_cmp) %in% remove_cor_var]
+
+#saveRDS(train_labCount_data_reduced,"train_labCount_data_reduced.RDS")
+```
+
+```{r}
+vis_miss(train_labCount_data_reduced)
+```
+
+```{r}
+train_label_reduced = train_label[train_label$patientid %in% train_labCount_data_reduced$patientid,]
+dim(train_label_reduced)
+
+#saveRDS(train_label_reduced,"train_SepsisLabel_A12H_red.RDS")
+```
+
+```{r}
+#patient characteristics
+
+completeIDs = train_labCount_data_reduced$patientid
+AllVariables = train_labCount_data[train_labCount_data$patientid %in% completeIDs,]
+head(AllVariables)
+
+```
+
+```{r}
+sum(AllVariables$Unit1[complete.cases(AllVariables$Unit1)] == 6)/20281
+sum(AllVariables$Unit2[complete.cases(AllVariables$Unit2)] == 6)/20281
+```
+
+
+```{r}
+#also change the test set
+test_labCount_data_lessmiss = test_labCount_data[,!colnames(test_labCount_data)%in% remove_miss_var]
+test_labCount_data_reduced = test_labCount_data_lessmiss[,!colnames(test_labCount_data_lessmiss) %in% remove_cor_var]
+dim(test_labCount_data_reduced)
+colnames(test_labCount_data_reduced)
+```
+
+```{r}
+
+vis_miss(test_labCount_data_reduced)
+```
+
+
+
+```{r}
+sum(complete.cases(test_labCount_data_reduced))
+test_labCount_data_cmp = test_labCount_data_reduced[complete.cases(test_labCount_data_reduced),]
+test_labCount_data_cmp[1:6,1:6]
+dim(test_labCount_data_cmp)
+getwd()
+```
+
+```{r}
+test_labCount_data_cmp[1:6,1:6]
+saveRDS(test_labCount_data_cmp,"test_labCount_data_reduced.RDS")
+
+```
+
+
+```{r}
+
+test_label_reduced = test_label[test_label$patientid %in% test_labCount_data_cmp$patientid,]
+saveRDS(test_label_reduced,"test_SepsisLabel_A12H_red.RDS")
+```
+

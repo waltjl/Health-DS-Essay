@@ -1,0 +1,248 @@
+---
+title: "eda_notebook"
+author: "Jordyn Walton"
+date: '2020-03-29'
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(naniar)
+library(caret)
+library(GGally)
+```
+
+## R Markdown
+This is a notebook for exploratory analysis of the training set.
+
+```{r}
+train_vital_data <- readRDS("train_vital_data.RDS")
+train_label <- readRDS("train_SepsisLabel_A12H.RDS")
+
+dim(train_vital_data)
+```
+
+
+`r nrow(train_vital_data)` individuals with `r ncol(train_vital_data)` variables – including demographics, vital signs and lab values
+
+```{r}
+sum(train_label$SepsisLabel)
+
+sum(train_label$SepsisLabel)/nrow(train_vital_data)
+```
+
+1366 have sepsis (5.51%)
+
+
+```{r}
+demographics = names(train_vital_data)[1:6]
+# > demographics
+# [1] "patientid"   "Age"         "Gender"      "Unit1"       "Unit2"
+# [6] "HospAdmTime"
+demInc = demographics[2:3] #only including variables inherent to the patient
+
+
+vitalSigns = names(train_vital_data)[7:(6+8*4)]
+Lab = names(train_vital_data)[39:length(names(train_vital_data))]
+
+train_vital_df = train_vital_data[,colnames(train_vital_data)%in% c(demInc,vitalSigns,Lab)]
+
+
+train_corr = cor(train_vital_df)
+train_corr[1:6,1:6]
+```
+Mostly NAs
+
+
+
+```{r}
+train_corr = cor(train_vital_df,use = "pairwise.complete.obs")
+train_corr[1:6,1:6]
+```
+
+
+
+
+#how much is missing in the dataset
+
+```{r}
+head(train_vital_data)
+
+```
+
+
+
+```{r}
+vis_miss(train_vital_data,warn_large_data = FALSE)
+```
+
+A high percentage of EtCO2 is missing
+
+
+
+
+```{r}
+vis_miss(train_vital_data[,grep("mean",colnames(train_vital_data))],warn_large_data = FALSE)
+
+```
+
+
+```{r}
+vis_miss(train_vital_data[,grep("min",colnames(train_vital_data))],warn_large_data = FALSE)
+
+```
+
+
+```{r}
+vis_miss(train_vital_data[,grep("max",colnames(train_vital_data))],warn_large_data = FALSE)
+
+```
+
+
+```{r}
+vis_miss(train_vital_data[,grep("min",colnames(train_vital_data))],warn_large_data = FALSE)
+
+```
+
+
+
+```{r}
+var_missing = miss_var_summary(train_vital_data,order=T)
+var_missing[1:10,]
+remove_miss_var = var_missing$variable[var_missing$pct_miss >=20]
+remove_miss_var
+```
+
+If I set the threshold to remove variables with more than 90% missingness, I am able to remove `r length(remove_miss_var)` variables.
+```{r}
+length(remove_miss_var)
+```
+
+This leads to a dataset with 27 variables.
+
+```{r}
+train_vital_df_rem_miss = train_vital_data[,!colnames(train_vital_data) %in% remove_miss_var]
+ncol(train_vital_df_rem_miss)
+```
+
+I also would like to work with complete cases in both the test and training set.
+
+```{r}
+sum(complete.cases(train_vital_df_rem_miss))
+```
+does this change a lot about the distribution of labels
+
+```{r}
+train_vital_cmp = train_vital_df_rem_miss[complete.cases(train_vital_df_rem_miss),]
+head(train_vital_cmp)
+```
+
+```{r}
+sum(train_label$SepsisLabel[train_label$patientid %in% train_vital_cmp$patientid])
+```
+
+```{r}
+1078/20281
+```
+5.3% positive cases - similar to before
+
+
+Do any variables have zero or near zero variance? No
+
+```{r}
+nzv <- nearZeroVar(train_vital_cmp, saveMetrics= TRUE)
+sum(nzv$zeroVar)
+sum(nzv$nzv)
+```
+
+I will only consider analyzing the data excluding patientid and hospital admit time
+```{r}
+train_vital_cmp_nadm = train_vital_cmp[,!colnames(train_vital_cmp) %in% c("patientid","HospAdmTime")]
+```
+
+
+Do any variables have high colinearity?
+
+```{r}
+train_corr = cor(train_vital_cmp_nadm)
+train_corr[1:6,1:6]
+```
+
+
+Visualizations
+
+```{r}
+ggcorr(train_vital_cmp_nadm[,sort(colnames(train_vital_cmp_nadm))],
+       method = c("pairwise.complete.obs","pearson"),label_size = 4)
+```
+
+```{r}
+ggpairs(train_vital_cmp_nadm,columns = c(1,2,3,4,5,6))
+
+```
+
+
+Columns to remove
+
+```{r}
+remove_cor <- findCorrelation(train_corr,cutoff = 0.9)
+length(remove_cor)
+```
+
+This involves getting rid of `r length(remove_cor)` variables, including
+
+```{r}
+remove_cor_var = colnames(train_vital_cmp_nadm)[remove_cor]
+remove_cor_var
+```
+
+
+Now to examine the variables that remain,
+
+```{r}
+train_vital_cmp_nadm_reduced = train_vital_cmp_nadm[,-remove_cor]
+colnames(train_vital_cmp_nadm_reduced)
+```
+
+Quick question: how many of the initial variables are truly removed?
+ All demographics remain -ie age and gender
+ 
+
+ 
+```{r}
+sort(names(train_vital_cmp_nadm_reduced))
+dim(train_vital_cmp_nadm_reduced)
+```
+ 
+
+ 
+```{r}
+head(train_vital_cmp_nadm_reduced)
+```
+
+
+```{r}
+train_vital_data_reduced = train_vital_cmp[,!colnames(train_vital_cmp) %in% remove_cor_var]
+head(train_vital_data_reduced)
+saveRDS(train_vital_data_reduced,"train_vital_data_reduced.RDS")
+```
+
+#after those reductions
+
+```{r}
+vis_miss(train_vital_data_reduced)
+```
+
+
+```{r}
+train_label_reduced = train_label[train_label$patientid %in% train_vital_data_reduced$patientid,]
+dim(train_label_reduced)
+
+saveRDS(train_label_reduced,"train_SepsisLabel_A12H_red.RDS")
+```
+
+
+
